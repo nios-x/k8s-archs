@@ -1,0 +1,15 @@
+# The ONE LoadBalancer in this setup. On EKS it creates a single Classic ELB.
+# frontend-serv and backend-serv are ClusterIP, so this is the only way in.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-serv
+spec:
+  selector:
+      app: gatewaylabel
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+      nodePort: 30007   # on kind (cluster.yml) the app is at http://localhost:30007
+  type: LoadBalancer

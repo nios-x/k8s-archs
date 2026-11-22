@@ -1,0 +1,38 @@
+# nginx config for the gateway pods. All routing for this setup lives here:
+#   /api/...  -> backend-serv   (the /api prefix is removed; express only serves "/")
+#   /...      -> frontend-serv
+# nginx doesn't reload when this changes. After editing, run:
+#   kubectl apply -f gateway-configmap.yml
+#   kubectl rollout restart deployment gateway-dep
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+data:
+  default.conf: |
+    server {
+        listen 80;
+
+        # used by the readiness probe in gateway-deployment.yml
+        location = /healthz {
+            access_log off;
+            return 200 "ok";
+        }
+
+        # The trailing "/" on proxy_pass replaces the matched "/api/" with "/":
+        #   /api/      -> backend-serv/
+        #   /api/posts -> backend-serv/posts
+        location /api/ {
+            proxy_pass http://backend-serv/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        }
+
+        location / {
+            proxy_pass http://frontend-serv;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        }
+    }

@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: 
+  name: frontend-dep
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: frontendlabel
+  template:
+    metadata:
+      labels:
+        app: frontendlabel  
+    spec:
+      containers: 
+      - name: frontendpod
+        image: devsoumya7/frontend:latest  
+        imagePullPolicy: Always
+        ports:
+          - containerPort: 3000
+
+
+
+
+

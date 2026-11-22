@@ -1,0 +1,13 @@
+# ClusterIP only: no public address. Reached through gateway-serv (location /).
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-serv
+spec:
+  selector:
+      app: frontendlabel
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000
+  type: ClusterIP
