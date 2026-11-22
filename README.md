@@ -76,6 +76,8 @@ nodePort 30008  ->  port 80  ->  targetPort 8000  =  containerPort 8000
 - `compose/docker-compose.yml` runs just Postgres on your machine, so you can work on the backend without Kubernetes.
 
 ### Step 1: NodePort (`k8s-1-node-port/`): runs on your laptop
+<img width="1542" height="727" alt="Screenshot 2026-11-22 194007" src="https://github.com/user-attachments/assets/c6eb4237-0d5e-4ef4-bfe1-2ae3e4795b1c" />
+<img width="1562" height="887" alt="Screenshot 2026-11-22 192131" src="https://github.com/user-attachments/assets/00ed007e-dacd-49e6-aa74-dc15b1b4a8e4" />
 
 ```
 browser
@@ -91,6 +93,8 @@ frontend pods x3              backend pods x3 --> postgres-serv (ClusterIP) --> 
 - **The problem:** NodePorts are odd high-numbered ports on each node's IP. That's fine on a laptop, not how you'd serve real users.
 
 ### Step 2: one LoadBalancer per service (`k8s-2-loadbalancers/`)
+<img width="1462" height="787" alt="Screenshot 2026-11-23 011722" src="https://github.com/user-attachments/assets/35c388ae-4dca-4955-8fd9-1a05e4f1f0df" />
+<img width="1542" height="727" alt="Screenshot 2026-11-22 194007" src="https://github.com/user-attachments/assets/917db084-0917-48dd-8e55-85dc6ce94803" />
 
 ```
 browser
@@ -109,6 +113,8 @@ frontend pods                 backend pods --> postgres
   - The browser calls a different address from the page it loaded, so the backend needs CORS (`app.use(cors())`).
 
 ### Step 3: Ingress controller (`k8s-3-ingess-controller/`)
+<img width="1462" height="787" alt="Screenshot 2026-11-23 011722" src="https://github.com/user-attachments/assets/a66b2af6-7462-4af3-9ffe-9e89cd0b0358" />
+<img width="1617" height="957" alt="Screenshot 2026-11-23 010359" src="https://github.com/user-attachments/assets/17a03562-bbc5-4dc1-8894-c471fb702884" />
 
 ```
 browser
