@@ -6,7 +6,8 @@ function App() {
   const [val, setVal]  = useState("")
   const sendIt = async()=>{
     console.log(val)
-    const res = await fetch("http://localhost:30008/", {
+    // const res = await fetch("http://localhost:30008/", {
+    const res = await fetch("http://a95a9afe600174f9cbff08a255f88827-1102760794.ap-south-1.elb.amazonaws.com", {
       method:"POST",
       headers:{
           "Content-Type": "application/json"
