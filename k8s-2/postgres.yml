@@ -1,0 +1,28 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-dep
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgreslabel
+  template:
+    metadata:
+      labels:
+        app: postgreslabel
+    spec:
+      containers:
+        - name: postgrespod
+          image: postgres:17
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              value: password
+            - name: POSTGRES_DB
+              value: mydb
