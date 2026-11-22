@@ -1,0 +1,129 @@
+Your ingress setup is fine. The problem is your AWS account: AWS is refusing to create the load balancer (OperationNotPermitted: This AWS account currently does not support creating load balancers). So the controller pod is running, but the Service will stay <pending> forever.
+
+The error mentions Elastic Load Balancing v2. That means it tried to create an NLB, because the AWS manifest adds the aws-load-balancer-type: nlb annotation. Your k8s-2 setup got a Classic ELB (a95a9...-1102760794.ap-south-1.elb.amazonaws.com in App.tsx:10 is the Classic address format). So the block might only cover the newer load balancer types. That's worth trying first.
+
+Option 1: Ask for a Classic ELB instead of an NLB
+Remove the NLB annotation; the trailing - deletes it:
+
+
+kubectl annotate svc ingress-nginx-controller -n ingress-nginx service.beta.kubernetes.io/aws-load-balancer-type-
+kubectl get svc -n ingress-nginx -w
+If EXTERNAL-IP fills in with an *.elb.amazonaws.com name after a minute or two, you're done. If kubectl describe svc shows the same OperationNotPermitted error, the block covers all load balancer types. Then go to Option 2.
+
+Option 2: Skip the load balancer and use a NodePort
+
+kubectl patch svc ingress-nginx-controller -n ingress-nginx --type merge -p '{\"spec\":{\"type\":\"NodePort\",\"externalTrafficPolicy\":\"Cluster\"}}'
+kubectl get svc -n ingress-nginx      # http port should stay 32448
+kubectl get nodes -o wide             # note a node's EXTERNAL-IP
+Then, in the EC2 console, add an inbound rule to the worker nodes' security group: TCP 32448 from your IP. You can then reach the app at http://<node-external-ip>:32448/. The \" escaping is needed because PowerShell 5.1 strips plain quotes out of the JSON.
+
+Getting the block lifted
+This is a restriction AWS puts on the account, often on new or unverified accounts. No Kubernetes change can remove it. Open a case with AWS Support (Account and billing → service limits) and ask them to enable Elastic Load Balancing.
+
+Two problems you'll hit next, whichever option you use
+/api will return 404. Your Ingress forwards /api/... to the backend unchanged, but index.ts only handles /. You'll need a rewrite on the Ingress or routes under /api in the backend.
+The frontend still calls the old k8s-2 backend load balancer. That URL is hardcoded at App.tsx:10 and App.tsx:25, and that load balancer is probably gone. Behind the ingress it should call /api instead, and you'll need to rebuild the frontend image after the change.
+I can fix both of those in the code if you'd like.
+
+
+
+service/ingress-nginx-controller annotated
+PS C:\Users\HP\Desktop\ss\k8s-3-ingess-controller> kubectl get svc -n ingress-nginx -w
+NAME                                 TYPE           CLUSTER-IP       EXTERNAL-IP                                                               PORT(S)                      AGE
+ingress-nginx-controller             LoadBalancer   10.100.104.134   a90199d65e6f44fd9bfe2087526878d3-626413895.ap-south-1.elb.amazonaws.com   80:32448/TCP,443:32065/TCP   6m36s
+ingress-nginx-controller-admission   ClusterIP      10.100.60.41     <none>                                                                    443/TCP                      6m36s
+Show more
+12:30 AM
+Classic ELB worked, so the block only covered NLB/ALB. Next I'll check how the frontend is served, then fix the /api routing and the hardcoded URL.
+
+
+
+Globpattern: "frontend/{Dockerfile,vite.config.*,package.json}"
+Found 3 files
+Read c:\Users\HP\Desktop\ss\frontend\Dockerfile
+Read c:\Users\HP\Desktop\ss\frontend\vite.config.ts
+Write c:\Users\HP\Desktop\ss\k8s-3-ingess-controller\backend-ingress.yml
+40 lines
+# Frontend: everything under /
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-serv
+                port:
+                  number: 80
+---
+# Backend: /api/* -> strip the /api prefix (the express app only serves "/")
+# Kept in a separate Ingress because rewrite-target applies to every path in an Ingress.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: backend-serv
+                port:
+                  number: 80
+Edit c:\Users\HP\Desktop\ss\frontend\src\App.tsx
+Added 1 line
+Edit c:\Users\HP\Desktop\ss\frontend\src\App.tsx
+Added 1 line
+Write c:\Users\HP\Desktop\ss\k8s-3-ingess-controller\nginx-controller.sh
+7 lines
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.13.3/deploy/static/provider/aws/deploy.yaml
+# creates external reource
+
+# This AWS account can't create NLBs (ELBv2: OperationNotPermitted), so drop the
+# NLB annotation and let EKS create a Classic ELB instead.
+kubectl annotate svc ingress-nginx-controller -n ingress-nginx service.beta.kubernetes.io/aws-load-balancer-type-
+12:31 AM
+The Classic ELB came up, so the block only covers the newer NLB/ALB load balancers. I've also fixed the two routing problems in the code. Nothing is deployed yet: the new frontend image hasn't been built, and none of these changes have been applied to the cluster.
+
+What I changed:
+
+backend-ingress.yml: it now holds two Ingresses.
+app-ingress sends / to the frontend.
+api-ingress sends /api/... to the backend and removes the /api prefix, so /api/ reaches the backend as /. That matches the routes in index.ts, so the backend code and image don't need to change.
+They're separate because the prefix rewrite would apply to every path in one Ingress.
+App.tsx: both requests now go to /api/ instead of the old k8s-2 load balancer address. The frontend and the API now share one address (the ELB), so the requests go through the ingress.
+nginx-controller.sh: I added the annotate command, so a fresh setup gets a Classic ELB again.
+Run these to deploy:
+
+
+cd ..\frontend
+docker build -t devsoumya7/frontend:latest .
+docker push devsoumya7/frontend:latest
+cd ..\k8s-3-ingess-controller
+kubectl apply -f backend-ingress.yml
+kubectl rollout restart deployment frontend-dep
+The frontend deployment uses the latest tag and always pulls the image, so the restart picks up the new build.
+
+Test: the ELB's DNS name can take 2–5 minutes to start resolving.
+
+
+curl.exe http://a90199d65e6f44fd9bfe2087526878d3-626413895.ap-south-1.elb.amazonaws.com/api/
+This should return {"posts":[...]. Then open the same address without /api/ in a browser to load the app.
+
+The editor is showing a react/jsx-runtime error in App.tsx. It's only because node_modules isn't installed locally, and the Docker build installs it.
+
+
+

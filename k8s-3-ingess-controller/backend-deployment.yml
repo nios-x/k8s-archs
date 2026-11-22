@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: 
+  name: backend-dep
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: backendlabel
+  template:
+    metadata:
+      labels:
+        app: backendlabel  
+    spec:
+      containers: 
+      - name: backendpod
+        image: devsoumya7/backend:latest  
+        imagePullPolicy: IfNotPresent
+        ports:
+          - containerPort: 8000
+
+
+
+
+

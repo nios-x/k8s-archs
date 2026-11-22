@@ -15,7 +15,7 @@ spec:
       containers: 
       - name: frontendpod
         image: devsoumya7/frontend:latest  
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         ports:
           - containerPort: 3000
 
