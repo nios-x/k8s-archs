@@ -132,6 +132,7 @@ frontend-serv     backend-serv     (both ClusterIP: not public any more)
 - **The trade-off:** you install and trust a whole third-party controller.
 
 ### Step 4: your own gateway (`k8s-4-single-lb-multiple-clusterip-diff-pods/`)
+<img width="1630" height="822" alt="image" src="https://github.com/user-attachments/assets/0001b31a-4372-4cae-b433-244d8ecf0e6e" />
 
 ```
 browser
