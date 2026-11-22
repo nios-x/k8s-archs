@@ -1,236 +1,203 @@
-# Kubernetes architectures: learn by doing
+# ☸️ Learn Kubernetes with one small app
 
-One small app is deployed 4 different ways. Each folder is one step, and each step fixes a problem left by the step before it.
+Deploy the **same note-taking app 4 different ways**, from the simplest setup to a realistic one.
+Each step fixes a problem left by the step before it.
 
-```
-k8s-1  NodePort          ->  k8s-2  LoadBalancers  ->  k8s-3  Ingress  ->  k8s-4  your own gateway
-(local, kind)                (AWS EKS)                 (AWS EKS)           (AWS EKS)
-```
-
-Every folder has its own `README.md` with the exact commands to run, open and delete it.
+**Step 1** NodePort → **Step 2** LoadBalancers → **Step 3** Ingress → **Step 4** your own gateway
 
 ---
 
-## 1. The app
+## ⚡ Try it now (free, on your laptop, about 5 minutes)
 
-A tiny note-taker with three parts:
+**You need:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) (running), [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) and [kubectl](https://kubernetes.io/docs/tasks/tools/).
 
-| Part         | What it is            | Port inside the pod |
-| ------------ | --------------------- | ------------------- |
-| `frontend/`  | React page            | 3000                |
-| `backend/`   | Express API: `GET /` lists notes, `POST /` adds a note | 8000 |
-| Postgres     | Database              | 5432                |
+```powershell
+cd k8s-4-single-lb-multiple-clusterip-diff-pods
+kind create cluster --name learn --config cluster.yml
+kubectl apply -f postgres.yml -f postgres-svc.yml -f backend-deployment.yml -f backend-svc.yml -f frontend-deployment.yml -f frontend-svc.yml
+kubectl apply -f gateway-configmap.yml -f gateway-deployment.yml -f gateway-svc.yml
+kubectl get pods -w        # wait until every pod says Running, then press Ctrl+C
+```
 
-Here's what trips most people up:
+Now open **http://localhost:30007**, type a note and press **SEND** 🎉
 
-> **The React code runs in your browser, not in the cluster.**
-> So the call to the backend comes from your laptop. That's why "how does the browser reach the backend?" is the question every architecture below answers differently.
+When you're done:
 
-The backend reaches Postgres from inside the cluster, using its service name: `host: "postgres-serv"` in `backend/src/index.ts`. Postgres never needs to be public.
+```powershell
+kind delete cluster --name learn
+```
+
+> [!NOTE]
+> On a laptop, `kubectl get svc` shows `EXTERNAL-IP <pending>`. That's normal: there's no cloud to create a load balancer, so you use port `30007` instead.
 
 ---
 
-## 2. Words to know first
+## 🧩 The app
 
-**Pod**: one running copy of a container. Pods are temporary: they die, they get replaced, and their IP changes.
+| Part | What it does |
+| --- | --- |
+| **frontend** | React page where you write notes |
+| **backend** | Express API that saves and lists notes |
+| **database** | Postgres, which stores the notes |
 
-**Deployment**: says "keep 3 copies of this pod running". If you delete a pod, the Deployment starts a new one. *(To really stop pods, delete the Deployment.)*
+> [!TIP]
+> **The one idea to remember:** the React code runs **in your browser**, so your browser has to reach the backend.
+> Each step below solves this in a different way.
 
-**Service**: a fixed name and IP in front of a group of pods. Other pods call `backend-serv` instead of chasing pod IPs. A Service comes in three types:
+---
 
-| Type           | Who can reach it                         | Used in      |
-| -------------- | ---------------------------------------- | ------------ |
-| `ClusterIP`    | Only things inside the cluster (default) | every folder (Postgres), k8s-3, k8s-4 |
-| `NodePort`     | Anyone who can reach a node, on a port in the 30000–32767 range | k8s-1 |
-| `LoadBalancer` | The internet, through a cloud load balancer (**costs money**) | k8s-2, k8s-4 |
+## 📖 5 words you need
 
-**Labels and selectors**: how a Service finds its pods.
+| Word | In plain English |
+| --- | --- |
+| **Pod** | One running copy of your app. It can die at any time and gets replaced. |
+| **Deployment** | A manager that keeps a set number of pods running (here, 3). Delete a pod and it starts a new one. |
+| **Service** | A fixed name, like `backend-serv`, that sends traffic to the right pods. |
+| **Ingress** | Rules such as "`/api` goes to the backend". An Ingress controller (nginx) follows them. |
+| **ConfigMap** | A config file stored inside Kubernetes. |
+
+There are **3 kinds of Service**:
+
+| Type | Who can reach it | Cost on AWS |
+| --- | --- | --- |
+| `ClusterIP` | Only things inside the cluster | free |
+| `NodePort` | Anyone, at node-IP plus a port from 30000 to 32767 | free |
+| `LoadBalancer` | Anyone, at a public address from the cloud | 💸 paid every hour |
+
+<details>
+<summary><b>How does a Service find its pods?</b> (click)</summary>
+
+By **labels**. The Deployment sticks a label on every pod, and the Service picks every pod with that label:
 
 ```yaml
-# backend-deployment.yml stamps this label on every backend pod
-labels:
-  app: backendlabel
-# backend-svc.yml sends traffic to every pod with that label
-selector:
-  app: backendlabel
+# backend-deployment.yml        # backend-svc.yml
+labels:                         selector:
+  app: backendlabel               app: backendlabel
 ```
+</details>
 
-**The four ports.** People mix these up all the time:
+<details>
+<summary><b>Why are there 4 port numbers?</b> (click)</summary>
 
 ```
 nodePort 30008  ->  port 80  ->  targetPort 8000  =  containerPort 8000
-(on the node)      (Service)     (in the pod)        (what the app listens on)
+ (on the node)      (Service)    (on the pod)        (what the app listens on)
 ```
-
-**Ingress** (k8s-3): a set of routing rules, for example "`/api` goes to the backend". It does nothing by itself. An **Ingress controller** (a pod running nginx) reads the rules and does the routing.
-
-**ConfigMap** (k8s-4): a config file stored in Kubernetes and mounted into a pod. We use one to hold nginx's config.
+</details>
 
 ---
 
-## 3. The learning path
+## 🗺️ The 4 steps
 
-### Step 0: warm-up (`references/`, `compose/`)
+| | Step 1 | Step 2 | Step 3 | Step 4 |
+| --- | --- | --- | --- | --- |
+| **Folder** | [k8s-1](k8s-1-node-port/) | [k8s-2](k8s-2-loadbalancers/) | [k8s-3](k8s-3-ingess-controller/) | [k8s-4](k8s-4-single-lb-multiple-clusterip-diff-pods/) |
+| **Runs on** | laptop | AWS | AWS | AWS or laptop |
+| **Public entry points** | 2 ports | 2 load balancers | 1 load balancer | 1 load balancer |
+| **Frontend calls backend at** | `localhost:30008` | backend's own URL | `/api/` | `/api/` |
+| **Cost** | free | 💸💸 | 💸 | 💸 (free on a laptop) |
 
-- `references/` has the smallest possible examples: a bare Pod (`nginx.yml`, `postgres.yml`), a ReplicaSet that keeps 3 copies (`replicaset.yml`), and a NodePort Service (`service.yml`).
-- `compose/docker-compose.yml` runs just Postgres on your machine, so you can work on the backend without Kubernetes.
+Each folder has a short README with the commands to **run**, **open** and **delete** it.
 
-### Step 1: NodePort (`k8s-1-node-port/`): runs on your laptop
+### Step 1: NodePort ([`k8s-1-node-port/`](k8s-1-node-port/))
 
 <img width="1562" height="887" alt="Screenshot 2026-11-22 192131" src="https://github.com/user-attachments/assets/00ed007e-dacd-49e6-aa74-dc15b1b4a8e4" />
 
-```
-browser
-  | localhost:30007               | localhost:30008
-  v                               v
-frontend-serv (NodePort)      backend-serv (NodePort)
-  |                               |
-frontend pods x3              backend pods x3 --> postgres-serv (ClusterIP) --> postgres pod
-```
+- **Idea:** open a port on the node for each part: frontend on `30007`, backend on `30008`.
+- **Problem:** odd port numbers on node IPs work on a laptop, but not for real users. ➜ Step 2
 
-- **You learn:** Deployments, Services, labels, and how kind's `cluster.yml` maps node ports to `localhost`.
-- **The frontend calls:** `http://localhost:30008/`
-- **The problem:** NodePorts are odd high-numbered ports on each node's IP. That's fine on a laptop, not how you'd serve real users.
-
-### Step 2: one LoadBalancer per service (`k8s-2-loadbalancers/`)
+### Step 2: one load balancer per app ([`k8s-2-loadbalancers/`](k8s-2-loadbalancers/))
 
 <img width="1542" height="727" alt="Screenshot 2026-11-22 194007" src="https://github.com/user-attachments/assets/917db084-0917-48dd-8e55-85dc6ce94803" />
 
-```
-browser
-  | ELB #1                        | ELB #2
-  v                               v
-frontend-serv (LoadBalancer)  backend-serv (LoadBalancer)
-  |                               |
-frontend pods                 backend pods --> postgres
-```
+- **Idea:** `type: LoadBalancer` asks AWS for a public address. The frontend and the backend get one each.
+- **Problem:** two load balancers means paying twice. On top of that, the backend's URL is written into the frontend code, so you rebuild the frontend every time it changes. ➜ Step 3
 
-- **You learn:** with `type: LoadBalancer`, AWS creates a real load balancer (ELB) with a public address.
-- **The frontend calls:** the backend ELB's address, hardcoded in `App.tsx`.
-- **The problems:**
-  - You pay for **two** ELBs.
-  - The backend's address is baked into the frontend image, so every new ELB means a rebuild.
-  - The browser calls a different address from the page it loaded, so the backend needs CORS (`app.use(cors())`).
+### Step 3: one load balancer + Ingress ([`k8s-3-ingess-controller/`](k8s-3-ingess-controller/))
 
-### Step 3: Ingress controller (`k8s-3-ingess-controller/`)
 <img width="1462" height="787" alt="Screenshot 2026-11-23 011722" src="https://github.com/user-attachments/assets/a66b2af6-7462-4af3-9ffe-9e89cd0b0358" />
 
+- **Idea:** one public address. The Ingress controller sends `/` to the frontend and `/api` to the backend, so the frontend just calls `/api/`.
+- **Problem:** you install a big third-party controller and can't see what it does. ➜ Step 4
 
-```
-browser
-  | one ELB
-  v
-ingress-nginx controller        <- reads the rules in backend-ingress.yml
-  | /                 | /api/...
-  v                   v
-frontend-serv     backend-serv     (both ClusterIP: not public any more)
-```
+### Step 4: one load balancer + your own nginx ([`k8s-4-single-lb-multiple-clusterip-diff-pods/`](k8s-4-single-lb-multiple-clusterip-diff-pods/))
 
-- **You learn:** path-based routing. There's one address for everything: `/` goes to the frontend and `/api/` goes to the backend.
-- **The frontend calls:** `/api/`, a path on the same address it loaded from, so there's no hardcoded URL and no rebuild per environment.
-- **A detail:** the backend only serves `/`, so the Ingress strips the prefix: `/api/posts` becomes `/posts` (`rewrite-target`).
-- **The trade-off:** you install and trust a whole third-party controller.
-
-### Step 4: your own gateway (`k8s-4-single-lb-multiple-clusterip-diff-pods/`)
 <img width="1630" height="822" alt="image" src="https://github.com/user-attachments/assets/0001b31a-4372-4cae-b433-244d8ecf0e6e" />
 
-```
-browser
-  | one ELB (gateway-serv)
-  v
-gateway pods: plain nginx       <- rules in gateway-configmap.yml
-  | /                 | /api/...
-  v                   v
-frontend-serv     backend-serv     (both ClusterIP)
-```
-
-- **You learn:** what an Ingress controller really is. It's just nginx, so here you build it by hand, with a Deployment, a ConfigMap and one LoadBalancer Service.
-- **The frontend calls:** `/api/`, the same as in step 3.
-- **A detail:** the prefix is stripped by the trailing `/` in `proxy_pass http://backend-serv/;`.
-
-### Side by side
-
-|                               | k8s-1          | k8s-2              | k8s-3              | k8s-4               |
-| ----------------------------- | -------------- | ------------------ | ------------------ | ------------------- |
-| Runs on                       | kind (laptop)  | EKS                | EKS                | EKS                 |
-| Public entry points           | 2 NodePorts    | 2 ELBs             | 1 ELB              | 1 ELB               |
-| Frontend calls backend at     | `localhost:30008` | backend ELB URL | `/api/`            | `/api/`             |
-| Where routing lives           | none           | none               | Ingress objects    | nginx ConfigMap     |
-| Backend public?               | yes            | yes                | no                 | no                  |
+- **Idea:** do step 3 by hand, with plain nginx pods and a ConfigMap holding the routing rules. Now you can see that an Ingress controller is "just nginx".
+- **Bonus:** it also runs on your laptop. That's the [quick start](#-try-it-now-free-on-your-laptop-about-5-minutes) above.
 
 ---
 
-## 4. Try it yourself
+## 🧪 Play with it
 
-Run these while any setup is up. They're the quickest way to *see* what Kubernetes does.
+Run these while the app is running and watch what Kubernetes does:
 
 ```powershell
-kubectl get pods -o wide                         # which node each pod is on, and its IP
+kubectl get pods -o wide                       # every pod, its node and its IP
 kubectl scale deployment backend-dep --replicas=5
-kubectl get pods -w                              # watch the new pods start (Ctrl+C to stop)
-kubectl delete pod <one-backend-pod-name>        # ...and watch the Deployment replace it
-kubectl describe svc backend-serv                # "Endpoints" = the pod IPs behind the Service
-kubectl logs deploy/backend-dep                  # the backend's console.log output
-kubectl port-forward svc/backend-serv 8080:80    # open http://localhost:8080, no load balancer needed
+kubectl delete pod <any-backend-pod-name>      # the Deployment brings it back
+kubectl logs deploy/backend-dep                # the backend's output
+kubectl describe svc backend-serv              # "Endpoints" = the pods behind it
 ```
 
-In k8s-4 you can also call the backend from inside the gateway pod, the same way nginx does:
+<details>
+<summary><b>🆘 Something not working?</b> (click for common problems)</summary>
 
-```powershell
-kubectl exec deploy/gateway-dep -- wget -qO- http://backend-serv/
-```
+| What you see | Why it happens | What to do |
+| --- | --- | --- |
+| `kubectl apply -f .` fails | `cluster.yml` is a kind file, not Kubernetes | list the files: `-f a.yml -f b.yml` |
+| Pods come back after you delete them | The Deployment replaces them | delete the Deployment instead |
+| Backend shows `RESTARTS 1` | It started before the database was ready | nothing; Kubernetes restarted it for you |
+| `port is already allocated` | Another kind cluster is using port 30007 | `kind get clusters`, then delete the old one |
+| `/api/` gives 404 | The backend only knows `/` | strip `/api` (k8s-3: `rewrite-target`, k8s-4: `proxy_pass .../;`) |
+| Load balancer stuck on `<pending>` on AWS | The account can't create the newer NLB type | use a Classic ELB (see the k8s-3 README) |
+| `Could not resolve host` | A new load balancer takes 2–5 min to get DNS | wait, or switch your DNS to `8.8.8.8` |
+| Notes disappear | The database has no volume, so its data dies with the pod | add a PersistentVolumeClaim (good next exercise!) |
+| Edited the ConfigMap, nothing changed | nginx only reads its config at startup | `kubectl rollout restart deployment gateway-dep` |
+</details>
 
 ---
 
-## 5. Problems we actually hit, and why
+## 💸 Using AWS? Read this first
 
-| What you see | Why | Fix |
-| ------------ | --- | --- |
-| `kubectl apply -f .` fails | `cluster.yml` is a kind file, not a Kubernetes object | list the files: `-f a.yml -f b.yml` |
-| Deleted pods come straight back | The Deployment replaces them | delete the Deployment |
-| Backend pods show `RESTARTS 1` | The backend started before Postgres was ready, crashed, and was restarted | nothing; this is Kubernetes healing itself |
-| `/api/` returns 404 | The backend only knows `/`, but got `/api/` | strip the prefix (`rewrite-target` in k8s-3, `proxy_pass .../;` in k8s-4) |
-| LoadBalancer stuck on `<pending>` with `OperationNotPermitted` | This AWS account can't create NLBs | remove the NLB annotation to get a Classic ELB (see k8s-3) |
-| `Could not resolve host` for a new ELB | DNS takes 2–5 minutes, and your PC's DNS may remember the early "not found" | wait, or use DNS `8.8.8.8` |
-| All notes are gone after a redeploy | Postgres has no volume, so its data dies with the pod | add a PersistentVolumeClaim (a good next exercise) |
-| Edited a ConfigMap and nothing changed | nginx read its config at startup | `kubectl rollout restart deployment gateway-dep` |
+> [!WARNING]
+> On AWS you pay **every hour, even when nobody uses the app**, for:
+> each load balancer, the EKS cluster (even when it's empty), and the worker machine.
+>
+> When you're done: **delete the app first** (its folder's README shows how), **then the cluster**.
+> If you delete the cluster first, its load balancers get left behind and keep charging.
 
----
-
-## 6. Cost: read this before using AWS
-
-On EKS these are **billed every hour, even if nobody visits the app**:
-
-- each `LoadBalancer` Service (one ELB each)
-- the EKS cluster itself, even when it's empty
-- the worker node (EC2 instance) and its disk
-
-When you're done, delete in this order:
+<details>
+<summary><b>Commands to delete the EKS cluster</b></summary>
 
 ```powershell
-# 1. your app (each folder's README has the exact delete command); this removes the ELBs
-# 2. in k8s-3 only: the ingress-nginx controller
-# 3. the cluster (node group first, then the cluster)
 aws eks delete-nodegroup --cluster-name sxoo-cluster --nodegroup-name soumya-workers --region ap-south-1
 aws eks wait nodegroup-deleted --cluster-name sxoo-cluster --nodegroup-name soumya-workers --region ap-south-1
 aws eks delete-cluster --name sxoo-cluster --region ap-south-1
 ```
 
-Delete the app *before* the cluster. If you delete the cluster first, nothing is left to clean up the ELBs, and they keep charging. Check the AWS console under EC2 → Load Balancers (ap-south-1) afterwards.
+Then check that EC2 → Load Balancers (ap-south-1) is empty in the AWS console.
+</details>
 
 ---
 
-## 7. Folder map
+## 📚 Learn more (free)
+
+- [Killercoda](https://killercoda.com/): free Kubernetes clusters in your browser
+- [Kubernetes tutorials](https://kubernetes.io/docs/tutorials/): the official step-by-step guides
+- **Introduction to Kubernetes (LFS158):** a free course from the Linux Foundation
+
+<details>
+<summary><b>📁 What's in this repo</b></summary>
 
 ```
-backend/        Express API + Dockerfile
-frontend/       React app + Dockerfile
-compose/        Postgres for local development
-references/     tiny Pod / ReplicaSet / Service examples
-k8s-1-node-port/                            step 1
-k8s-2-loadbalancers/                        step 2
-k8s-3-ingess-controller/                    step 3
-k8s-4-single-lb-multiple-clusterip-diff-pods/  step 4
-.github/workflows/docker-publish.yml        pushes devsoumya7/backend and devsoumya7/frontend
-                                            to Docker Hub on every push to main
+backend/      Express API + Dockerfile
+frontend/     React app + Dockerfile
+compose/      Postgres only, for working on the backend locally
+references/   tiny examples: a Pod, a ReplicaSet, a Service
+k8s-1-…       step 1     k8s-2-…  step 2
+k8s-3-…       step 3     k8s-4-…  step 4
+.github/      builds the images and pushes them to Docker Hub on every push to main
 ```
+</details>
