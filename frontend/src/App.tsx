@@ -21,7 +21,8 @@ function App() {
   }
   useEffect(() => {
     const fetcher = async () => {
-      const todos = await fetch("http://localhost:30008/")
+      // const todos = await fetch("http://localhost:30008/", {
+      const todos = await fetch("http://a95a9afe600174f9cbff08a255f88827-1102760794.ap-south-1.elb.amazonaws.com/")
       setTodos((await todos.json()).posts)
     }
     fetcher()
